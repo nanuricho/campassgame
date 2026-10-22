@@ -1,0 +1,6 @@
+{
+  "name": "사탕 팡팡 컴퍼스 원 게임",
+  "description": "초등학교 3학년 수학 '원' 단원을 3D 주사위와 360도 실시간 회전 컴퍼스로 배우는 2인 대결 사탕 수집 게임",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
