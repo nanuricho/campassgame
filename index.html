@@ -383,7 +383,7 @@ details.cal p{font-size:11.5px;color:var(--ink-3);margin:8px 0 6px;line-height:1
         <path d="M6.6 16.6a9 9 0 0 0 10.8 0"/>
       </svg>
       <h1>모눈 컴퍼스</h1>
-      <span class="tag">1칸 = 1cm</span>
+      <span class="tag" id="scaleTag">1칸 = 1cm</span>
     </div>
     <div class="readout" id="readout"></div>
     <div class="topacts">
@@ -618,6 +618,7 @@ details.cal p{font-size:11.5px;color:var(--ink-3);margin:8px 0 6px;line-height:1
       <p class="savenote">두 도구 모두 <b>중심과 반지름이 같으면 같은 원</b>이 그려져요. 도구를 바꿔 가며 같은 원을 그려 보세요.</p>
       <p class="savenote"><b>선분</b> 도구는 한 점에서 다른 점까지 끌면 그어져요. 반지름이나 지름을 선분으로 그어 재어 보세요. <b>자</b>를 종이 위에 대면 원의 지름이나 선분의 길이를 직접 잴 수 있어요.
       <b>펜</b>으로는 원 안에 얼굴을 그리거나 이름을 쓰는 것처럼 자유롭게 그릴 수 있어요.</p>
+      <p class="savenote"><b>두 손가락</b>을 벌리거나 오므리면 종이가 커지고 작아져요. <b>두 손가락으로 끌면</b> 종이가 위아래·옆으로 움직여요. 위쪽의 ‘1칸 = 1cm · ○○%’ 표를 누르면 처음대로 돌아가요.</p>
     </section>
 
   </aside>
@@ -657,6 +658,8 @@ var S = {
   show: { center:true, radius:false, diameter:false, length:true },
   grid: true, ruler: true, snap: true,
   cal: 1,
+  zoom: 1,
+  view: { x: 0, y: 0 },   /* 화면 왼쪽 위가 종이의 어디인지 (cm) — 손가락으로 밀어 옮긴다 */        /* 보기 배율 — 작을수록 종이가 넓게 보인다. 그림의 cm 크기는 바뀌지 않는다 */
   shapes: [],
   compass: { x:5, y:6, r:3, ang:-0.5 },
   rul: { x:1, y:2, ang:0, len:15 },
@@ -724,7 +727,8 @@ function resize(){
   cv.width = Math.round(W * dpr);
   cv.height = Math.round(H * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  PPC = BASE_PPC * S.cal;
+  PPC = BASE_PPC * S.cal * S.zoom;
+  OX = S.view.x * PPC; OY = S.view.y * PPC;
   Wcm = W / PPC; Hcm = H / PPC;
   if (!seeded) scheduleSeed();
   /* claude.ai 화면 안에서는 종이 크기가 늦게 정해진다. 아직 아무도 컴퍼스를 건드리지 않았으면
@@ -776,8 +780,8 @@ function placeCompassDefault(){
   if (!Wcm) return;
   S.compass.r = 3;
   S.compass.ang = -0.5;
-  S.compass.x = round5(Math.max(1, Math.min(6, Wcm * 0.3)));
-  S.compass.y = round5(Math.max(1.5, Math.min(Hcm - 1, Hcm * 0.72)));
+  S.compass.x = round5(S.view.x + Math.max(1, Math.min(6, Wcm * 0.3)));
+  S.compass.y = round5(S.view.y + Math.max(1.5, Math.min(Hcm - 1, Hcm * 0.72)));
   syncRadiusUI();
 }
 function round5(v){ return Math.round(v * 2) / 2; }
@@ -967,26 +971,38 @@ function drawRulers(){
   ctx.strokeStyle = "#5F7A8C";
   ctx.lineWidth = 1;
   ctx.beginPath();
-  for (i = 0; i * mm <= W; i++){
-    x = Math.round(i * mm) + 0.5;
+  /* 종이를 밀어 옮겨도 눈금은 종이의 cm를 그대로 따라간다 */
+  var showMm = mm >= 3;
+  for (i = Math.floor(OX / mm); i * mm - OX <= W; i++){
+    if (!showMm && i % 5 !== 0) continue;
+    x = Math.round(i * mm - OX) + 0.5;
     if (x < T) continue;
     len = (i % 10 === 0) ? 11 : (i % 5 === 0) ? 7 : 4;
     ctx.moveTo(x, T); ctx.lineTo(x, T - len);
   }
-  for (i = 0; i * mm <= H; i++){
-    y = Math.round(i * mm) + 0.5;
+  for (i = Math.floor(OY / mm); i * mm - OY <= H; i++){
+    if (!showMm && i % 5 !== 0) continue;
+    y = Math.round(i * mm - OY) + 0.5;
     if (y < T) continue;
     len = (i % 10 === 0) ? 11 : (i % 5 === 0) ? 7 : 4;
     ctx.moveTo(T, y); ctx.lineTo(T - len, y);
   }
   ctx.stroke();
 
-  step = PPC < 30 ? 2 : 1;
+  step = PPC < 30 ? (PPC < 17 ? 5 : 2) : 1;
   ctx.fillStyle = "#43535F";
   ctx.font = '500 9.5px "IBM Plex Mono", monospace';
   ctx.textAlign = "left"; ctx.textBaseline = "middle";
-  for (i = step; i * PPC <= W - 8; i += step) ctx.fillText(String(i), i * PPC + 2, 6);
-  for (i = step; i * PPC <= H - 8; i += step) ctx.fillText(String(i), 3, i * PPC + 7);
+  for (i = Math.ceil(OX / PPC / step) * step; i * PPC - OX <= W - 8; i += step){
+    x = i * PPC - OX;
+    if (x < T + 2 || i === 0) continue;
+    ctx.fillText(String(i), x + 2, 6);
+  }
+  for (i = Math.ceil(OY / PPC / step) * step; i * PPC - OY <= H - 8; i += step){
+    y = i * PPC - OY;
+    if (y < T + 2 || i === 0) continue;
+    ctx.fillText(String(i), 3, y + 7);
+  }
   ctx.fillStyle = "#7C8A95";
   ctx.font = '500 8px "IBM Plex Mono", monospace';
   ctx.fillText("cm", 3, 11);
@@ -1472,13 +1488,13 @@ function placeRulDefault(){
   if (!Wcm) return;
   S.rul.len = Wcm >= 22 ? 15 : Wcm >= 15 ? 10 : Math.max(5, Math.floor(Wcm - 3));
   S.rul.ang = 0;
-  S.rul.x = 1;
-  S.rul.y = round5(Math.max(1.2, Math.min(Hcm - 2.5, Hcm * 0.22)));
+  S.rul.x = round5(S.view.x + 1);
+  S.rul.y = round5(S.view.y + Math.max(1.2, Math.min(Hcm - 2.5, Hcm * 0.22)));
 }
 function clampRul(){
   if (!Wcm) return;
-  S.rul.x = Math.max(0.1, Math.min(Wcm - 0.1, S.rul.x));
-  S.rul.y = Math.max(0.1, Math.min(Hcm - 0.1, S.rul.y));
+  S.rul.x = Math.max(S.view.x + 0.1, Math.min(S.view.x + Wcm - 0.1, S.rul.x));
+  S.rul.y = Math.max(S.view.y + 0.1, Math.min(S.view.y + Hcm - 0.1, S.rul.y));
 }
 function rulDeg(){
   /* 화면은 아래로 갈수록 y가 커진다 — 사람이 보는 대로 반시계 방향을 + 로 */
@@ -1584,6 +1600,9 @@ function pt(e){
   var r = cv.getBoundingClientRect();
   return { x: e.clientX - r.left, y: e.clientY - r.top };
 }
+/* 화면의 점 → 종이의 cm (종이를 밀어 옮긴 만큼 더한다) */
+function cx(p){ return (p.x + OX) / PPC; }
+function cy(p){ return (p.y + OY) / PPC; }
 function snapXY(v){ return S.snap ? Math.round(v * 2) / 2 : Math.round(v * 100) / 100; }
 function snapR(v){
   v = Math.max(0.5, Math.min(9, v));
@@ -1591,8 +1610,8 @@ function snapR(v){
 }
 function clampCompass(){
   if (!Wcm) return;
-  S.compass.x = Math.max(0.1, Math.min(Wcm - 0.1, S.compass.x));
-  S.compass.y = Math.max(0.1, Math.min(Hcm - 0.1, S.compass.y));
+  S.compass.x = Math.max(S.view.x + 0.1, Math.min(S.view.x + Wcm - 0.1, S.compass.x));
+  S.compass.y = Math.max(S.view.y + 0.1, Math.min(S.view.y + Hcm - 0.1, S.compass.y));
   S.compass.r = Math.max(0.5, Math.min(9, S.compass.r));
 }
 function normPi(a){
@@ -1648,15 +1667,73 @@ function pushUndo(){
   syncButtons();
 }
 
+/* ---- 두 손가락으로 오므리고 벌리면 종이 크기가 바뀐다 ----
+   한 손가락으로 그리기 시작했다가 두 번째 손가락이 닿으면, 그리던 것은 없던 일로 하고 크기 조절로 넘어간다. */
+var touches = {}, pinch = null, pinchLock = false, downSnap = null;
+function touchCount(){ return Object.keys(touches).length; }
+function touchDist(){
+  var k = Object.keys(touches);
+  return k.length < 2 ? 0 : dist(touches[k[0]], touches[k[1]]);
+}
+function takeSnap(){
+  downSnap = {
+    shapes: JSON.stringify(S.shapes), undoLen: undoStack.length, redo: redoStack.slice(),
+    compass: JSON.stringify(S.compass), rul: JSON.stringify(S.rul),
+    crop: crop ? JSON.stringify(crop) : null, cropMode: cropMode, activeId: activeId, sel: selIds.slice()
+  };
+}
+function cancelDrag(){
+  if (downSnap){
+    S.shapes = JSON.parse(downSnap.shapes);
+    undoStack.length = Math.min(undoStack.length, downSnap.undoLen);
+    redoStack = downSnap.redo;
+    S.compass = JSON.parse(downSnap.compass);
+    S.rul = JSON.parse(downSnap.rul);
+    crop = downSnap.crop ? JSON.parse(downSnap.crop) : null;
+    cropMode = downSnap.cropMode;
+    activeId = downSnap.activeId;
+    selIds = downSnap.sel;
+  }
+  if (ptrId !== null){ try { cv.releasePointerCapture(ptrId); } catch (err) {} }
+  drag = null; ptrId = null; downSnap = null;
+  syncButtons(); syncRadiusUI(); syncSel(); syncReadout();
+}
+function touchMid(){
+  var k = Object.keys(touches), a = touches[k[0]], b = touches[k[1]];
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
+function startPinch(){
+  cancelDrag();
+  var m = touchMid();
+  /* 두 손가락 가운데에 있는 종이의 점이 손가락을 따라다니게 한다 */
+  pinch = { d0: Math.max(20, touchDist()), z0: S.zoom, px: cx(m), py: cy(m) };
+  pinchLock = true;
+  draw();
+}
+
 cv.addEventListener("pointerdown", function(e){
+  if (e.pointerType === "touch"){
+    touches[e.pointerId] = pt(e);
+    var tc = touchCount();
+    if (tc === 2 && !pinch){ e.preventDefault(); startPinch(); return; }
+    if (tc > 2 || pinchLock){ e.preventDefault(); return; }
+  }
   if (ptrId !== null) return;
   ptrId = e.pointerId;
   try { cv.setPointerCapture(ptrId); } catch (err) {}
   var p = pt(e);
   e.preventDefault();
+  takeSnap();
+
+  /* 마우스: 가운데·오른쪽 버튼이나 스페이스바를 누른 채 끌면 종이가 움직인다 */
+  if (e.pointerType !== "touch" && (e.button === 1 || e.button === 2 || spaceDown)){
+    drag = { mode: "pan", sx: p.x, sy: p.y, vx: S.view.x, vy: S.view.y };
+    cv.style.cursor = "grabbing";
+    return;
+  }
 
   if (cropMode){
-    var cx0 = snapXY(p.x / PPC), cy0 = snapXY(p.y / PPC);
+    var cx0 = snapXY(cx(p)), cy0 = snapXY(cy(p));
     crop = { x0: cx0, y0: cy0, x1: cx0, y1: cy0 };
     drag = { mode: "crop" };
   } else if (isCircleTool(S.tool)){
@@ -1675,7 +1752,7 @@ cv.addEventListener("pointerdown", function(e){
       drag = { mode: "crot", off: S.compass.ang - Math.atan2(p.y - Pr.y, p.x - Pr.x) };
       activeId = null;
     } else if (hit === "body"){
-      drag = { mode: "body", ox: S.compass.x - p.x / PPC, oy: S.compass.y - p.y / PPC };
+      drag = { mode: "body", ox: S.compass.x - cx(p), oy: S.compass.y - cy(p) };
     } else {
       drag = { mode: "pivot" };
       applyPivot(p);
@@ -1689,22 +1766,22 @@ cv.addEventListener("pointerdown", function(e){
       drag = { mode: "rread" };
       rulRead = rh.t;
     } else if (rh.part === "body"){
-      drag = { mode: "rmove", ox: S.rul.x - p.x / PPC, oy: S.rul.y - p.y / PPC };
+      drag = { mode: "rmove", ox: S.rul.x - cx(p), oy: S.rul.y - cy(p) };
     } else {
       /* 빈 종이를 누르면 자의 0이 그 자리로 온다 */
-      S.rul.x = snapXY(p.x / PPC); S.rul.y = snapXY(p.y / PPC);
+      S.rul.x = snapXY(cx(p)); S.rul.y = snapXY(cy(p));
       clampRul();
       drag = { mode: "rmove", ox: 0, oy: 0 };
     }
     syncRul();
   } else if (S.tool === "pen"){
     pushUndo();
-    var pth = mkPath([[r2(p.x / PPC), r2(p.y / PPC)]], S.color, PEN_W[S.pen] || PEN_W.mid);
+    var pth = mkPath([[r2(cx(p)), r2(cy(p))]], S.color, PEN_W[S.pen] || PEN_W.mid);
     S.shapes.push(pth);
     drag = { mode: "pen", id: pth.id };
   } else if (S.tool === "line"){
     pushUndo();
-    var sx = snapXY(p.x / PPC), sy = snapXY(p.y / PPC);
+    var sx = snapXY(cx(p)), sy = snapXY(cy(p));
     var ln = mkLine(sx, sy, sx, sy, S.color);
     S.shapes.push(ln);
     drag = { mode: "line", id: ln.id };
@@ -1732,7 +1809,7 @@ cv.addEventListener("pointerdown", function(e){
           var ak = anchorOf(list[k]);
           items.push({ id: list[k].id, s0: snapshotOf(list[k]), ax: ak.x, ay: ak.y });
         }
-        drag = { mode: "move", items: items, gx: p.x / PPC, gy: p.y / PPC, moved: false };
+        drag = { mode: "move", items: items, gx: cx(p), gy: cy(p), moved: false };
       }
     } else {
       if (!add) selIds = [];
@@ -1773,8 +1850,8 @@ function addPenPoint(ph, x, y){
 }
 
 function applyPivot(p){
-  S.compass.x = snapXY(p.x / PPC);
-  S.compass.y = snapXY(p.y / PPC);
+  S.compass.x = snapXY(cx(p));
+  S.compass.y = snapXY(cy(p));
   clampCompass();
   activeId = null;
 }
@@ -1809,7 +1886,24 @@ function startTurn(p){
 
 cv.addEventListener("pointermove", function(e){
   var p = pt(e);
+  if (e.pointerType === "touch" && touches[e.pointerId]){
+    touches[e.pointerId] = p;
+    if (pinch){
+      e.preventDefault();
+      if (touchCount() >= 2){
+        var m2 = touchMid();
+        var z2 = Math.max(0.4, Math.min(1.5, Math.round(pinch.z0 * touchDist() / pinch.d0 * 100) / 100));
+        var np = BASE_PPC * S.cal * z2;
+        S.zoom = z2;
+        setView(pinch.px - m2.x / np, pinch.py - m2.y / np, true);
+        syncZoom(); resize();
+      }
+      return;
+    }
+    if (pinchLock){ e.preventDefault(); return; }
+  }
   if (ptrId === null || !drag){ hoverCursor(p); return; }
+  if (e.pointerId !== ptrId) return;      /* 다른 손가락의 움직임은 무시 */
   e.preventDefault();
 
   if (drag.mode === "pen"){
@@ -1820,17 +1914,21 @@ cv.addEventListener("pointermove", function(e){
     if (!evs.length) evs = [e];
     for (var ci = 0; ci < evs.length; ci++){
       var q = pt(evs[ci]);
-      addPenPoint(ph, q.x / PPC, q.y / PPC);
+      addPenPoint(ph, cx(q), cy(q));
     }
     draw();
     return;
   }
+  if (drag.mode === "pan"){
+    setView(drag.vx - (p.x - drag.sx) / PPC, drag.vy - (p.y - drag.sy) / PPC);
+    return;
+  }
   if (drag.mode === "crop"){
-    crop.x1 = Math.max(0, Math.min(Wcm, snapXY(p.x / PPC)));
-    crop.y1 = Math.max(0, Math.min(Hcm, snapXY(p.y / PPC)));
+    crop.x1 = Math.max(S.view.x, Math.min(S.view.x + Wcm, snapXY(cx(p))));
+    crop.y1 = Math.max(S.view.y, Math.min(S.view.y + Hcm, snapXY(cy(p))));
   } else if (drag.mode === "rmove"){
-    S.rul.x = snapXY(p.x / PPC + drag.ox);
-    S.rul.y = snapXY(p.y / PPC + drag.oy);
+    S.rul.x = snapXY(cx(p) + drag.ox);
+    S.rul.y = snapXY(cy(p) + drag.oy);
     clampRul(); rulRead = null; syncRul();
   } else if (drag.mode === "rrot"){
     var Or = w2s(S.rul.x, S.rul.y);
@@ -1849,8 +1947,8 @@ cv.addEventListener("pointermove", function(e){
   } else if (drag.mode === "open"){
     applyOpen(p);
   } else if (drag.mode === "body"){
-    S.compass.x = snapXY(p.x / PPC + drag.ox);
-    S.compass.y = snapXY(p.y / PPC + drag.oy);
+    S.compass.x = snapXY(cx(p) + drag.ox);
+    S.compass.y = snapXY(cy(p) + drag.oy);
     clampCompass(); activeId = null;
   } else if (drag.mode === "crot"){
     var Pc = w2s(S.compass.x, S.compass.y);
@@ -1887,7 +1985,7 @@ cv.addEventListener("pointermove", function(e){
     setLineEnd(el, drag.which === 1 ? 2 : 1, p, e.shiftKey);
   } else if (drag.mode === "move"){
     /* 여럿을 함께 옮길 때는 하나의 이동량을 계산해 서로의 간격을 지킨다 */
-    var dx = p.x / PPC - drag.gx, dy = p.y / PPC - drag.gy;
+    var dx = cx(p) - drag.gx, dy = cy(p) - drag.gy;
     var a = drag.items[0];
     if (S.snap){ dx = snapXY(a.ax + dx) - a.ax; dy = snapXY(a.ay + dy) - a.ay; }
     for (var mi = 0; mi < drag.items.length; mi++){
@@ -1908,7 +2006,7 @@ cv.addEventListener("pointermove", function(e){
 function setLineEnd(ln, fixed, p, shift){
   var fx = (fixed === 1) ? ln.x1 : ln.x2;
   var fy = (fixed === 1) ? ln.y1 : ln.y2;
-  var ex = p.x / PPC, ey = p.y / PPC, mx, my;
+  var ex = cx(p), ey = cy(p), mx, my;
   if (shift){
     var ang = Math.round(Math.atan2(ey - fy, ex - fx) / (Math.PI / 4)) * (Math.PI / 4);
     var len = Math.max(0, (ex - fx) * Math.cos(ang) + (ey - fy) * Math.sin(ang));
@@ -1984,8 +2082,23 @@ function endDrag(){
   ptrId = null;
   save(); draw(); syncReadout(); syncSel();
 }
-cv.addEventListener("pointerup", endDrag);
-cv.addEventListener("pointercancel", endDrag);
+function onPointerUp(e){
+  if (e.pointerType === "touch") delete touches[e.pointerId];
+  if (pinch || pinchLock){
+    if (pinch && touchCount() < 2){
+      pinch = null;
+      save();
+      toast("종이 크기 " + Math.round(S.zoom * 100) + "%");
+    }
+    if (touchCount() === 0) pinchLock = false;
+    return;
+  }
+  if (e.pointerId !== ptrId && ptrId !== null) return;
+  downSnap = null;
+  endDrag();
+}
+cv.addEventListener("pointerup", onPointerUp);
+cv.addEventListener("pointercancel", onPointerUp);
 
 var hintedTurn = false;
 function maybeHintTurn(){
@@ -2219,6 +2332,73 @@ $("calRange").addEventListener("input", function(){
   save(); resize();
 });
 
+/* 종이 크기 (보기 배율) */
+function syncZoom(){
+  var z = Math.round(S.zoom * 100), home = !S.view.x && !S.view.y && z === 100;
+  var tag = $("scaleTag");
+  tag.textContent = z === 100 ? "1칸 = 1cm" : "1칸 = 1cm · " + z + "%로 보기";
+  /* 크기나 자리를 바꿨을 때만, 표를 누르면 처음대로 돌아간다 */
+  tag.style.cursor = home ? "" : "pointer";
+  tag.title = home ? "" : "누르면 처음 자리·100%로 돌아가요";
+}
+function setZoom(z, fine){
+  /* 손가락으로 조절하는 동안은 부드럽게, 끝나면 10% 단위로 */
+  z = Math.max(0.4, Math.min(1.5, fine ? Math.round(z * 100) / 100 : Math.round(z * 10) / 10));
+  if (z === S.zoom){ syncZoom(); return; }
+  S.zoom = z;
+  syncZoom(); if (!fine) save(); resize();
+}
+/* ---- 종이 밀어 옮기기 ---- */
+var VIEW_MAX = 200;    /* 오른쪽·아래로 200cm까지 */
+var VIEW_MIN = -200;   /* 종이는 위·아래·왼쪽·오른쪽 어디로든 이어진다 */
+var spaceDown = false;
+function setView(x, y, noDraw){
+  S.view.x = Math.max(VIEW_MIN, Math.min(VIEW_MAX, x));
+  S.view.y = Math.max(VIEW_MIN, Math.min(VIEW_MAX, y));
+  OX = S.view.x * PPC; OY = S.view.y * PPC;
+  syncZoom();
+  if (!noDraw){ draw(); save(); }
+}
+/* 화면의 한 점을 기준으로 확대·축소 (마우스 휠) */
+function zoomAt(z, sx, sy){
+  var px = cx({ x: sx, y: sy }), py = cy({ x: sx, y: sy });
+  z = Math.max(0.4, Math.min(1.5, Math.round(z * 100) / 100));
+  var np = BASE_PPC * S.cal * z;
+  S.zoom = z;
+  setView(px - sx / np, py - sy / np, true);
+  syncZoom(); save(); resize();
+}
+cv.addEventListener("contextmenu", function(e){ e.preventDefault(); });
+cv.addEventListener("wheel", function(e){
+  /* 좁은 화면에서는 페이지를 내려야 하니 휠을 빼앗지 않는다 (Ctrl+휠 확대는 된다) */
+  if (window.innerWidth <= 880 && !(e.ctrlKey || e.metaKey)) return;
+  e.preventDefault();
+  var p = pt(e), k = e.deltaMode === 1 ? 16 : 1;
+  if (e.ctrlKey || e.metaKey){
+    zoomAt(S.zoom * Math.exp(-e.deltaY * k * 0.0025), p.x, p.y);
+  } else {
+    var dx = e.deltaX * k, dy = e.deltaY * k;
+    if (e.shiftKey && !dx){ dx = dy; dy = 0; }
+    setView(S.view.x + dx / PPC, S.view.y + dy / PPC);
+  }
+}, { passive: false });
+window.addEventListener("keydown", function(e){
+  var t = e.target;
+  if (e.code === "Space" && !(t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "BUTTON"))){
+    e.preventDefault();
+    if (!spaceDown){ spaceDown = true; cv.style.cursor = "grab"; }
+  }
+});
+window.addEventListener("keyup", function(e){
+  if (e.code === "Space"){ spaceDown = false; cv.style.cursor = "crosshair"; }
+});
+$("scaleTag").addEventListener("click", function(){
+  if (!S.view.x && !S.view.y && S.zoom === 1) return;
+  S.zoom = 1; S.view.x = 0; S.view.y = 0;
+  syncZoom(); setView(0, 0, true); save(); resize();
+  toast("처음 자리, 100%로 돌아왔어요");
+});
+
 /* 고른 그림 */
 function syncSel(){
   pruneSel();
@@ -2448,7 +2628,7 @@ function kb(bytes){
 }
 
 function exportBounds(shapes){
-  if (saveScope === "all") return { x0:0, y0:0, x1:Wcm, y1:Hcm };
+  if (saveScope === "all") return { x0: S.view.x, y0: S.view.y, x1: S.view.x + Wcm, y1: S.view.y + Hcm };
   if (saveScope === "area" && crop) return cropRect(crop);
   var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, i, bb;
   for (i = 0; i < shapes.length; i++){
@@ -2464,6 +2644,12 @@ function exportBounds(shapes){
 
 /* 그리기 함수들을 그대로 쓰되, 잠깐 다른 캔버스·다른 잘라낸 위치로 돌린다 */
 function renderExport(shapes){
+  /* 화면을 줄여 보고 있어도 저장은 실제 크기(1칸 = 1cm)로 */
+  var _PPC = PPC;
+  PPC = BASE_PPC * S.cal;
+  try { return renderExportAt(shapes); } finally { PPC = _PPC; }
+}
+function renderExportAt(shapes){
   var b = exportBounds(shapes), scale = saveScale;
   var cw = Math.max(1, Math.round((b.x1 - b.x0) * PPC));
   var ch = Math.max(1, Math.round((b.y1 - b.y0) * PPC));
@@ -2925,7 +3111,7 @@ function save(){
     try {
       localStorage.setItem(STORE, JSON.stringify({
         shapes: S.shapes, compass: S.compass, rul: S.rul, guide: S.guide, showGuide: S.showGuide, color: S.color, pen: S.pen, show: S.show,
-        grid: S.grid, ruler: S.ruler, snap: S.snap, cal: S.cal,
+        grid: S.grid, ruler: S.ruler, snap: S.snap, cal: S.cal, zoom: S.zoom, view: S.view,
         tool: S.tool, cmode: S.cmode, fillErase: S.fillErase,
         saveScope: saveScope, saveBg: saveBg, saveScale: saveScale, crop: crop
       }));
@@ -2947,6 +3133,9 @@ function load(){
   if (d.show) for (var k in S.show) if (typeof d.show[k] === "boolean") S.show[k] = d.show[k];
   ["grid","ruler","snap","fillErase"].forEach(function(k){ if (typeof d[k] === "boolean") S[k] = d[k]; });
   if (typeof d.cal === "number") S.cal = Math.max(0.6, Math.min(1.6, d.cal));
+  if (typeof d.zoom === "number") S.zoom = Math.max(0.4, Math.min(1.5, Math.round(d.zoom * 100) / 100));
+  if (d.view && typeof d.view.x === "number" && typeof d.view.y === "number" && isFinite(d.view.x) && isFinite(d.view.y))
+    S.view = { x: Math.max(-200, Math.min(200, d.view.x)), y: Math.max(-200, Math.min(200, d.view.y)) };
   if (Array.isArray(d.guide)){ var gl = cleanShapes(d.guide); S.guide = gl.length ? gl : null; }
   if (typeof d.showGuide === "boolean") S.showGuide = d.showGuide;
   if (d.rul && typeof d.rul.x === "number" && typeof d.rul.ang === "number"){
@@ -2968,6 +3157,7 @@ BASE_PPC = measureBasePPC();
 load();
 $("calRange").value = S.cal;
 $("calOut").textContent = Math.round(S.cal * 100) + "%";
+syncZoom();
 $("chkCenter").checked = S.show.center;
 $("chkRadius").checked = S.show.radius;
 $("chkDiameter").checked = S.show.diameter;

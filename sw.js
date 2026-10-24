@@ -1,6 +1,6 @@
 /* 모눈 컴퍼스 — 오프라인 실행용 서비스 워커
    앱을 고쳐 다시 올릴 때는 VERSION 숫자를 하나 올려 주세요. 그래야 설치된 앱도 새 버전을 받아요. */
-var VERSION = "mogeun-compass-v3";
+var VERSION = "mogeun-compass-v10";
 var FILES = [
   "./",
   "index.html",
